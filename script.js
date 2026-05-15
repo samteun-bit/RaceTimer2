@@ -6,22 +6,26 @@
 
 const config = {
   totalLaps: 5,
-  targetLapMs: null, // null = no target
+  targetLapMs: null,
 };
 
 let racers = [];
 let nextRacerId = 0;
 
+let records = [];      // persistent across resets
+let nextRecordId = 0;
+
 const timerState = {
   running: false,
-  startTime: null,  // performance.now() when current segment started
-  elapsed: 0,       // ms accumulated from previous segments
-  pauseAt: null,    // performance.now() when paused
+  startTime: null,
+  elapsed: 0,
+  pauseAt: null,
   rafId: null,
 };
 
-let raceState = 'idle'; // 'idle' | 'running' | 'paused' | 'finished'
+let raceState = 'idle';
 let expandedRacerId = null;
+let expandedRecordId = null;
 
 // ============================================================
 // Time Utilities
@@ -32,26 +36,19 @@ function pad2(n) {
 }
 
 function formatTime(ms) {
-  const totalCs = Math.floor(ms / 10);
-  const cs      = totalCs % 100;
+  const totalCs  = Math.floor(ms / 10);
+  const cs       = totalCs % 100;
   const totalSec = Math.floor(ms / 1000);
   const sec      = totalSec % 60;
   const totalMin = Math.floor(totalSec / 60);
   const min      = totalMin % 60;
   const hr       = Math.floor(totalMin / 60);
 
-  const csStr = pad2(cs);
-  const secStr = pad2(sec);
-  const minStr = pad2(min);
-
-  if (hr > 0) {
-    return `${hr}:${minStr}:${secStr}.${csStr}`;
-  }
-  return `${minStr}:${secStr}.${csStr}`;
+  if (hr > 0) return `${hr}:${pad2(min)}:${pad2(sec)}.${pad2(cs)}`;
+  return `${pad2(min)}:${pad2(sec)}.${pad2(cs)}`;
 }
 
 function parseTargetTime(str) {
-  // Accepts: MM:SS, MM:SS.cs, MM:SS.ms (1-3 digits after dot)
   str = str.trim();
   if (!str) return null;
   const match = str.match(/^(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?$/);
@@ -60,9 +57,8 @@ function parseTargetTime(str) {
   const sec = parseInt(match[2], 10);
   let sub = 0;
   if (match[3]) {
-    // Pad or truncate to 2 digits (centiseconds)
     const padded = match[3].padEnd(2, '0').slice(0, 2);
-    sub = parseInt(padded, 10) * 10; // convert cs to ms
+    sub = parseInt(padded, 10) * 10;
   }
   return (min * 60 + sec) * 1000 + sub;
 }
@@ -72,14 +68,64 @@ function parseTargetTime(str) {
 // ============================================================
 
 function timerTick() {
-  const elapsed = timerState.elapsed + (performance.now() - timerState.startTime);
+  const now = performance.now();
+  const elapsed = timerState.elapsed + (now - timerState.startTime);
   document.getElementById('timer-display').textContent = formatTime(elapsed);
+  updateLeaderboardRealtime(now);
   timerState.rafId = requestAnimationFrame(timerTick);
 }
 
-function getCurrentElapsed() {
-  if (!timerState.running) return timerState.elapsed;
-  return timerState.elapsed + (performance.now() - timerState.startTime);
+// Update total-time cells and re-sort leaderboard rows every frame
+function updateLeaderboardRealtime(now) {
+  const tbody = document.getElementById('leaderboard-body');
+  if (!tbody) return;
+
+  // Update running totals for each non-finished racer
+  racers.forEach(r => {
+    if (r.finished || !r.currentLapStart) return;
+    const row = tbody.querySelector(`.lb-row[data-racer-id="${r.id}"]`);
+    if (!row) return;
+    const runningTotal = getTotalTimeMs(r) + (now - r.currentLapStart);
+    row.querySelector('.col-total').textContent = formatTime(runningTotal);
+  });
+
+  // Re-sort DOM rows if order changed
+  const sorted = sortedRacersRealtime(now);
+  const currentOrder = [...tbody.querySelectorAll('.lb-row')].map(r => r.dataset.racerId).join(',');
+  const newOrder = sorted.map(r => String(r.id)).join(',');
+
+  if (currentOrder !== newOrder) {
+    sorted.forEach((racer, i) => {
+      const mainRow   = tbody.querySelector(`.lb-row[data-racer-id="${racer.id}"]`);
+      const detailRow = tbody.querySelector(`.lb-detail-row[data-racer-id="${racer.id}"]`);
+      if (mainRow)   tbody.appendChild(mainRow);
+      if (detailRow) tbody.appendChild(detailRow);
+
+      // Update position badge
+      if (mainRow) {
+        mainRow.querySelector('.col-pos').textContent = i + 1;
+        mainRow.classList.remove('is-p1', 'is-p2', 'is-p3');
+        if (i === 0) mainRow.classList.add('is-p1');
+        else if (i === 1) mainRow.classList.add('is-p2');
+        else if (i === 2) mainRow.classList.add('is-p3');
+      }
+    });
+  }
+}
+
+function sortedRacersRealtime(now) {
+  return [...racers].sort((a, b) => {
+    if (a.finished && b.finished) return a.finishPosition - b.finishPosition;
+    if (a.finished) return -1;
+    if (b.finished) return 1;
+
+    const lapDiff = b.lapTimes.length - a.lapTimes.length;
+    if (lapDiff !== 0) return lapDiff;
+
+    const aTotal = getTotalTimeMs(a) + (a.currentLapStart ? now - a.currentLapStart : 0);
+    const bTotal = getTotalTimeMs(b) + (b.currentLapStart ? now - b.currentLapStart : 0);
+    return aTotal - bTotal;
+  });
 }
 
 // ============================================================
@@ -102,6 +148,7 @@ function startRace() {
     r.currentLapStart = now;
     r.finished = false;
     r.finishPosition = null;
+    r.recorded = false;
   });
 
   timerState.rafId = requestAnimationFrame(timerTick);
@@ -121,7 +168,6 @@ function resumeRace() {
   const now = performance.now();
   const pauseDuration = now - timerState.pauseAt;
 
-  // Shift each racer's current lap start forward by the pause duration
   racers.forEach(r => {
     if (!r.finished && r.currentLapStart !== null) {
       r.currentLapStart += pauseDuration;
@@ -141,16 +187,23 @@ function resetRace() {
   timerState.elapsed = 0;
   timerState.rafId = null;
 
+  // Save any racer with laps that hasn't been recorded yet
+  racers.forEach(r => {
+    if (!r.recorded && r.lapTimes.length > 0) {
+      saveRacerRecord(r);
+    }
+  });
+
   racers.forEach(r => {
     r.lapTimes = [];
     r.currentLapStart = null;
     r.finished = false;
     r.finishPosition = null;
+    r.recorded = false;
   });
 
   expandedRacerId = null;
   document.getElementById('timer-display').textContent = formatTime(0);
-  document.getElementById('lap-indicator').textContent = '';
 
   setRaceState('idle');
   renderAll();
@@ -160,11 +213,12 @@ function setRaceState(state) {
   raceState = state;
   document.body.className = 'state-' + state;
 
-  const badge = document.getElementById('race-status-badge');
-  badge.className = 'status-badge';
+  const badge    = document.getElementById('race-status-badge');
   const startBtn = document.getElementById('start-btn');
   const stopBtn  = document.getElementById('stop-btn');
   const resetBtn = document.getElementById('reset-btn');
+
+  badge.className = 'status-badge';
 
   switch (state) {
     case 'idle':
@@ -216,6 +270,127 @@ function lockConfig(locked) {
 }
 
 // ============================================================
+// Records (persistent)
+// ============================================================
+
+function saveRacerRecord(racer) {
+  records.push({
+    recordId: nextRecordId++,
+    name: racer.name,
+    lapTimes: [...racer.lapTimes],
+    totalMs: racer.lapTimes.reduce((a, b) => a + b, 0),
+    bestLapMs: racer.lapTimes.length ? Math.min(...racer.lapTimes) : null,
+    totalLaps: config.totalLaps,
+    finished: racer.finished,
+    timestamp: new Date(),
+  });
+  racer.recorded = true;
+  renderRecords();
+}
+
+function deleteRecord(recordId) {
+  records = records.filter(r => r.recordId !== recordId);
+  if (expandedRecordId === recordId) expandedRecordId = null;
+  renderRecords();
+}
+
+function renderRecords() {
+  const section  = document.getElementById('records-section');
+  const empty    = document.getElementById('records-empty');
+  const tbody    = document.getElementById('records-body');
+  const table    = document.getElementById('records-table');
+
+  if (records.length === 0) {
+    empty.style.display = 'block';
+    table.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  table.style.display = '';
+
+  // Find overall best lap across all records
+  let overallBest = null;
+  records.forEach(r => {
+    if (r.bestLapMs !== null && (overallBest === null || r.bestLapMs < overallBest)) {
+      overallBest = r.bestLapMs;
+    }
+  });
+
+  tbody.innerHTML = '';
+
+  // Sort: finished first, then by total time ascending
+  const sorted = [...records].sort((a, b) => {
+    if (a.finished && !b.finished) return -1;
+    if (!a.finished && b.finished) return 1;
+    return a.totalMs - b.totalMs;
+  });
+
+  sorted.forEach((rec, i) => {
+    const mainRow = document.createElement('tr');
+    mainRow.className = 'rec-row';
+    mainRow.dataset.recordId = rec.recordId;
+    if (i === 0) mainRow.classList.add('is-p1');
+    else if (i === 1) mainRow.classList.add('is-p2');
+    else if (i === 2) mainRow.classList.add('is-p3');
+    if (expandedRecordId === rec.recordId) mainRow.classList.add('is-expanded');
+
+    const dateStr = rec.timestamp.toLocaleDateString() + ' ' +
+                    rec.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const bestClass = rec.bestLapMs === overallBest ? 'lb-best-overall' : '';
+    const bestText  = rec.bestLapMs !== null ? formatTime(rec.bestLapMs) : '—';
+    const totalText = formatTime(rec.totalMs);
+    const lapsText  = `${rec.lapTimes.length}/${rec.totalLaps}`;
+    const statusBadge = rec.finished
+      ? `<span class="lb-status-badge status-done">FINISHED</span>`
+      : `<span class="lb-status-badge status-racing">PARTIAL</span>`;
+
+    mainRow.innerHTML = `
+      <td class="col-racer">
+        <span class="lb-racer-name">${escHtml(rec.name)}</span>
+        <span class="lb-expand-icon">&#x25BE;</span>
+      </td>
+      <td class="col-lap">${lapsText}</td>
+      <td class="col-best ${bestClass}">${bestText}</td>
+      <td class="col-total">${totalText}</td>
+      <td class="rec-date">${dateStr}</td>
+      <td class="rec-status">${statusBadge}</td>
+      <td class="rec-del">
+        <button class="btn-rec-delete" data-delete-id="${rec.recordId}" title="Delete">&#x2715;</button>
+      </td>
+    `;
+
+    const detailRow = document.createElement('tr');
+    detailRow.className = 'lb-detail-row' + (expandedRecordId === rec.recordId ? ' is-expanded' : '');
+    detailRow.dataset.recordId = rec.recordId;
+
+    const chips = rec.lapTimes.map((ms, idx) => {
+      let cls = 'no-target';
+      if (config.targetLapMs !== null) {
+        cls = ms <= config.targetLapMs ? 'is-faster' : 'is-slower';
+      }
+      return `<div class="lb-lap-chip">
+        <span class="lb-lap-num">Lap ${idx + 1}</span>
+        <span class="lb-lap-time ${cls}">${formatTime(ms)}</span>
+      </div>`;
+    }).join('');
+
+    detailRow.innerHTML = `
+      <td colspan="7">
+        <div class="lb-detail-inner">
+          <div class="lb-detail-content">
+            <div class="lb-detail-grid">${chips || '<span style="color:var(--text-dim);font-size:0.8rem;">No laps recorded.</span>'}</div>
+          </div>
+        </div>
+      </td>
+    `;
+
+    tbody.appendChild(mainRow);
+    tbody.appendChild(detailRow);
+  });
+}
+
+// ============================================================
 // Racer Management
 // ============================================================
 
@@ -231,6 +406,7 @@ function addRacer() {
     currentLapStart: null,
     finished: false,
     finishPosition: null,
+    recorded: false,
   });
 
   input.value = '';
@@ -247,7 +423,7 @@ function removeRacer(id) {
 }
 
 function renderRacerList() {
-  const list = document.getElementById('racer-list');
+  const list  = document.getElementById('racer-list');
   const empty = document.getElementById('racer-list-empty');
 
   list.innerHTML = '';
@@ -280,11 +456,9 @@ function recordLap(racerId) {
   if (racer.lapTimes.length >= config.totalLaps) {
     racer.finished = true;
     racer.finishPosition = racers.filter(r => r.finished).length;
-
-    // Flash finish
+    saveRacerRecord(racer);
     flashFinish(racerId);
 
-    // Check if all racers are done
     if (racers.every(r => r.finished)) {
       cancelAnimationFrame(timerState.rafId);
       timerState.running = false;
@@ -309,7 +483,7 @@ function flashFinish(racerId) {
 }
 
 // ============================================================
-// Leaderboard
+// Leaderboard (active race)
 // ============================================================
 
 function getBestLapMs(racer) {
@@ -332,24 +506,19 @@ function overallBestLapMs() {
 
 function sortedRacers() {
   return [...racers].sort((a, b) => {
-    // Finished racers come first, ordered by finishPosition
     if (a.finished && b.finished) return a.finishPosition - b.finishPosition;
     if (a.finished) return -1;
     if (b.finished) return 1;
-
-    // More laps completed = higher rank
     const lapDiff = b.lapTimes.length - a.lapTimes.length;
     if (lapDiff !== 0) return lapDiff;
-
-    // Same laps: less total time = better
     return getTotalTimeMs(a) - getTotalTimeMs(b);
   });
 }
 
 function renderLeaderboard() {
-  const tbody = document.getElementById('leaderboard-body');
+  const tbody    = document.getElementById('leaderboard-body');
   const emptyMsg = document.getElementById('leaderboard-empty');
-  const table = document.getElementById('leaderboard');
+  const table    = document.getElementById('leaderboard');
 
   if (racers.length === 0) {
     emptyMsg.style.display = 'block';
@@ -359,27 +528,21 @@ function renderLeaderboard() {
   emptyMsg.style.display = 'none';
   table.style.display = '';
 
-  const sorted = sortedRacers();
+  const sorted      = sortedRacers();
   const overallBest = overallBestLapMs();
 
-  // Build a set of existing racer IDs in DOM, keyed by racer id
   const existingRows = {};
-  tbody.querySelectorAll('.lb-row').forEach(row => {
-    existingRows[row.dataset.racerId] = row;
-  });
+  tbody.querySelectorAll('.lb-row').forEach(row => { existingRows[row.dataset.racerId] = row; });
   const existingDetails = {};
-  tbody.querySelectorAll('.lb-detail-row').forEach(row => {
-    existingDetails[row.dataset.racerId] = row;
-  });
+  tbody.querySelectorAll('.lb-detail-row').forEach(row => { existingDetails[row.dataset.racerId] = row; });
 
-  // Rebuild tbody in sorted order
   sorted.forEach((racer, index) => {
     const pos = index + 1;
-    let mainRow = existingRows[racer.id];
+    let mainRow   = existingRows[racer.id];
     let detailRow = existingDetails[racer.id];
 
     if (!mainRow) {
-      mainRow = createMainRow(racer.id);
+      mainRow   = createMainRow(racer.id);
       detailRow = createDetailRow(racer.id);
     }
 
@@ -390,7 +553,6 @@ function renderLeaderboard() {
     tbody.appendChild(detailRow);
   });
 
-  // Remove rows for deleted racers
   Object.keys(existingRows).forEach(id => {
     if (!racers.find(r => r.id == id)) {
       existingRows[id].remove();
@@ -415,7 +577,6 @@ function createMainRow(racerId) {
 }
 
 function updateMainRow(row, racer, pos, overallBest) {
-  // Position classes
   row.className = 'lb-row';
   if (racer.finished) row.classList.add('is-finished');
   if (pos === 1) row.classList.add('is-p1');
@@ -427,18 +588,13 @@ function updateMainRow(row, racer, pos, overallBest) {
   row.querySelector('.lb-racer-name').textContent = racer.name;
 
   const lapDone = racer.lapTimes.length;
-  const lapText = raceState === 'idle' ? '—' : `${lapDone}/${config.totalLaps}`;
-  row.querySelector('.col-lap').textContent = lapText;
+  row.querySelector('.col-lap').textContent =
+    raceState === 'idle' ? '—' : `${lapDone}/${config.totalLaps}`;
 
-  const bestMs = getBestLapMs(racer);
-  const bestEl = row.querySelector('.col-best');
-  if (bestMs !== null) {
-    bestEl.textContent = formatTime(bestMs);
-    bestEl.className = 'col-best' + (bestMs === overallBest ? ' lb-best-overall' : '');
-  } else {
-    bestEl.textContent = '—';
-    bestEl.className = 'col-best';
-  }
+  const bestMs  = getBestLapMs(racer);
+  const bestEl  = row.querySelector('.col-best');
+  bestEl.textContent = bestMs !== null ? formatTime(bestMs) : '—';
+  bestEl.className   = 'col-best' + (bestMs !== null && bestMs === overallBest ? ' lb-best-overall' : '');
 
   const totalMs = getTotalTimeMs(racer);
   row.querySelector('.col-total').textContent = lapDone > 0 ? formatTime(totalMs) : '—';
@@ -471,21 +627,17 @@ function createDetailRow(racerId) {
 }
 
 function updateDetailRow(row, racer) {
-  const isExpanded = expandedRacerId === racer.id;
-  row.classList.toggle('is-expanded', isExpanded);
-
+  row.classList.toggle('is-expanded', expandedRacerId === racer.id);
   const grid = row.querySelector('.lb-detail-grid');
   grid.innerHTML = '';
 
   racer.lapTimes.forEach((ms, i) => {
     const chip = document.createElement('div');
     chip.className = 'lb-lap-chip';
-
     let timeClass = 'no-target';
     if (config.targetLapMs !== null) {
       timeClass = ms <= config.targetLapMs ? 'is-faster' : 'is-slower';
     }
-
     chip.innerHTML = `
       <span class="lb-lap-num">Lap ${i + 1}</span>
       <span class="lb-lap-time ${timeClass}">${formatTime(ms)}</span>
@@ -510,7 +662,7 @@ function renderLapButtons() {
     const btn = document.createElement('button');
     btn.className = 'lap-btn' + (r.finished ? ' is-finished' : '');
     btn.dataset.racerId = r.id;
-    const lapNum = r.lapTimes.length + 1;
+    const lapNum    = r.lapTimes.length + 1;
     const displayLap = r.finished ? 'FINISHED' : `Lap ${lapNum} / ${config.totalLaps}`;
     btn.innerHTML = `
       <span class="lap-btn-name">${escHtml(r.name)}</span>
@@ -525,7 +677,7 @@ function renderLapButtons() {
 // ============================================================
 
 function renderLapIndicator() {
-  const el = document.getElementById('lap-indicator');
+  const el     = document.getElementById('lap-indicator');
   const target = config.targetLapMs !== null ? ` · Target ${formatTime(config.targetLapMs)}/lap` : '';
   el.textContent = `${config.totalLaps} LAP RACE${target}`;
 }
@@ -534,6 +686,7 @@ function renderAll() {
   renderRacerList();
   renderLapButtons();
   renderLeaderboard();
+  renderRecords();
   renderLapIndicator();
 }
 
@@ -547,7 +700,7 @@ function escHtml(str) {
 
 function shakeElement(el) {
   el.style.animation = 'none';
-  el.getBoundingClientRect(); // flush
+  el.getBoundingClientRect();
   el.style.animation = 'shake 0.3s ease';
   el.addEventListener('animationend', () => { el.style.animation = ''; }, { once: true });
 }
@@ -557,32 +710,26 @@ function shakeElement(el) {
 // ============================================================
 
 function bindEvents() {
-  // Start / Resume
   document.getElementById('start-btn').addEventListener('click', () => {
     if (raceState === 'idle') startRace();
     else if (raceState === 'paused') resumeRace();
   });
 
-  // Pause
   document.getElementById('stop-btn').addEventListener('click', () => {
     if (raceState === 'running') pauseRace();
   });
 
-  // Reset
   document.getElementById('reset-btn').addEventListener('click', () => {
-    if (!confirm('Reset the race? All lap data will be lost.')) return;
+    if (!confirm('Reset the race? (Lap records will be saved to history.)')) return;
     resetRace();
   });
 
-  // Add racer button
   document.getElementById('add-racer-btn').addEventListener('click', addRacer);
 
-  // Enter key in racer name input
   document.getElementById('racer-name-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') addRacer();
   });
 
-  // Lap count input
   document.getElementById('lap-count-input').addEventListener('change', e => {
     let val = parseInt(e.target.value, 10);
     if (isNaN(val) || val < 1) val = 1;
@@ -594,37 +741,45 @@ function bindEvents() {
     renderLeaderboard();
   });
 
-  // Target lap time input
   document.getElementById('target-lap-input').addEventListener('change', e => {
     const parsed = parseTargetTime(e.target.value);
     config.targetLapMs = parsed;
-    if (e.target.value.trim() && parsed === null) {
-      e.target.style.borderColor = 'var(--accent-red)';
-    } else {
-      e.target.style.borderColor = '';
-    }
+    e.target.style.borderColor = (e.target.value.trim() && parsed === null) ? 'var(--accent-red)' : '';
     renderLapIndicator();
   });
 
-  // Delegated: remove racer buttons in racer list
   document.getElementById('racer-list').addEventListener('click', e => {
     const btn = e.target.closest('[data-remove-id]');
     if (btn) removeRacer(parseInt(btn.dataset.removeId, 10));
   });
 
-  // Delegated: lap buttons
   document.getElementById('lap-buttons-list').addEventListener('click', e => {
     const btn = e.target.closest('[data-racer-id]');
     if (btn) recordLap(parseInt(btn.dataset.racerId, 10));
   });
 
-  // Delegated: leaderboard row expand/collapse
+  // Leaderboard expand/collapse
   document.getElementById('leaderboard-body').addEventListener('click', e => {
     const row = e.target.closest('.lb-row');
     if (!row) return;
     const id = parseInt(row.dataset.racerId, 10);
     expandedRacerId = expandedRacerId === id ? null : id;
     renderLeaderboard();
+  });
+
+  // Records: expand/collapse and delete
+  document.getElementById('records-body').addEventListener('click', e => {
+    const delBtn = e.target.closest('[data-delete-id]');
+    if (delBtn) {
+      deleteRecord(parseInt(delBtn.dataset.deleteId, 10));
+      return;
+    }
+    const row = e.target.closest('.rec-row');
+    if (row) {
+      const id = parseInt(row.dataset.recordId, 10);
+      expandedRecordId = expandedRecordId === id ? null : id;
+      renderRecords();
+    }
   });
 }
 

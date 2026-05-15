@@ -599,6 +599,95 @@ body.state-finished #stop-btn         { display: none; }
 .lb-lap-time.no-target { color: var(--text-primary); }
 
 /* ============================================================
+   Records Section
+   ============================================================ */
+#records-section {
+  margin-top: 2rem;
+  border-top: 1px solid var(--border);
+  padding-top: 1.5rem;
+}
+
+.records-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.records-empty {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  padding: 1rem 0;
+  line-height: 1.6;
+}
+
+.records-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.records-table thead th {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.rec-date-col { width: 130px; }
+.rec-del-col  { width: 36px; text-align: center; }
+
+.rec-row {
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+.rec-row:hover { background: var(--bg-hover); }
+.rec-row.is-p1 { border-left: 3px solid var(--accent-yellow); }
+.rec-row.is-p2 { border-left: 3px solid var(--silver); }
+.rec-row.is-p3 { border-left: 3px solid var(--bronze); }
+
+.rec-row td {
+  padding: 0.55rem 0.75rem;
+  font-size: 0.82rem;
+  vertical-align: middle;
+}
+
+.rec-row .col-lap,
+.rec-row .col-best,
+.rec-row .col-total {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: right;
+}
+.rec-row .col-lap { text-align: center; }
+
+.rec-date {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.btn-rec-delete {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  transition: color 0.15s, background 0.15s;
+}
+.btn-rec-delete:hover {
+  color: var(--accent-red);
+  background: rgba(232, 19, 42, 0.1);
+}
+
+/* ============================================================
    Scrollbars
    ============================================================ */
 ::-webkit-scrollbar            { width: 5px; }

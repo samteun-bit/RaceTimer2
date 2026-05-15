@@ -104,6 +104,30 @@
         </tbody>
       </table>
 
+      <!-- Records (persistent) -->
+      <div id="records-section">
+        <div class="records-header">
+          <h2 class="section-title">Records</h2>
+        </div>
+        <div id="records-empty" class="records-empty">No records yet. Records are saved automatically when a racer finishes or the race is reset.</div>
+        <table id="records-table" class="records-table">
+          <thead>
+            <tr>
+              <th class="col-racer">Racer</th>
+              <th class="col-lap">Laps</th>
+              <th class="col-best">Best Lap</th>
+              <th class="col-total">Total</th>
+              <th class="rec-date-col">Date</th>
+              <th class="col-status">Status</th>
+              <th class="rec-del-col"></th>
+            </tr>
+          </thead>
+          <tbody id="records-body">
+            <!-- Populated by JS -->
+          </tbody>
+        </table>
+      </div>
+
     </section>
 
   </main>
