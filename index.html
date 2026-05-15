@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Race Timer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="state-idle">
+
+  <header>
+    <div class="header-inner">
+      <span class="header-flag">&#x1F3C1;</span>
+      <h1 class="header-title">RACE TIMER</h1>
+      <span id="race-status-badge" class="status-badge status-idle">READY</span>
+    </div>
+  </header>
+
+  <main class="app-layout">
+
+    <!-- LEFT PANEL -->
+    <section id="left-panel">
+
+      <!-- Timer display -->
+      <div id="timer-block">
+        <div id="timer-display">00:00.00</div>
+        <div id="lap-indicator" class="lap-indicator"></div>
+      </div>
+
+      <!-- Configuration (visible in idle/paused) -->
+      <div id="config-block">
+        <h2 class="section-title">Race Setup</h2>
+
+        <div class="config-row">
+          <label for="lap-count-input" class="config-label">Total Laps</label>
+          <input type="number" id="lap-count-input" class="config-input" min="1" max="99" value="5">
+        </div>
+
+        <div class="config-row">
+          <label for="target-lap-input" class="config-label">Target / Lap</label>
+          <input type="text" id="target-lap-input" class="config-input" placeholder="MM:SS.ms (optional)">
+        </div>
+
+        <div class="config-divider"></div>
+
+        <h2 class="section-title">Racers</h2>
+
+        <div class="racer-add-row">
+          <input type="text" id="racer-name-input" class="racer-name-input" placeholder="Enter racer name..." maxlength="24">
+          <button id="add-racer-btn" class="btn-add">+ Add</button>
+        </div>
+
+        <ul id="racer-list" class="racer-list">
+          <!-- Populated by JS -->
+        </ul>
+
+        <p id="racer-list-empty" class="racer-list-empty">No racers added yet.</p>
+      </div>
+
+      <!-- Race controls -->
+      <div id="race-controls">
+        <button id="start-btn" class="btn-primary btn-start">START</button>
+        <button id="stop-btn" class="btn-secondary btn-stop" disabled>PAUSE</button>
+        <button id="reset-btn" class="btn-danger btn-reset" disabled>RESET</button>
+      </div>
+
+      <!-- Lap buttons (shown during race) -->
+      <div id="lap-buttons-block">
+        <h2 class="section-title lap-buttons-title">Record Lap</h2>
+        <div id="lap-buttons-list">
+          <!-- Populated by JS: one button per racer -->
+        </div>
+      </div>
+
+    </section>
+
+    <div class="panel-divider"></div>
+
+    <!-- RIGHT PANEL -->
+    <section id="right-panel">
+
+      <h2 class="section-title leaderboard-title">Leaderboard</h2>
+
+      <div id="leaderboard-empty" class="leaderboard-empty">
+        Add racers and start the race to see standings.
+      </div>
+
+      <table id="leaderboard" class="leaderboard-table">
+        <thead>
+          <tr>
+            <th class="col-pos">Pos</th>
+            <th class="col-racer">Racer</th>
+            <th class="col-lap">Lap</th>
+            <th class="col-best">Best Lap</th>
+            <th class="col-total">Total Time</th>
+            <th class="col-status">Status</th>
+          </tr>
+        </thead>
+        <tbody id="leaderboard-body">
+          <!-- Populated by JS -->
+        </tbody>
+      </table>
+
+    </section>
+
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
