@@ -464,12 +464,13 @@ body.state-finished #stop-btn         { display: none; }
   text-align: left;
 }
 
-.col-pos    { width: 48px; text-align: center; }
-.col-racer  { width: auto; }
-.col-lap    { width: 72px; text-align: center; }
-.col-best   { width: 96px; text-align: right; }
-.col-total  { width: 110px; text-align: right; }
-.col-status { width: 110px; text-align: center; }
+.col-pos     { width: 48px; text-align: center; }
+.col-racer   { width: auto; }
+.col-lap     { width: 64px; text-align: center; }
+.col-current { width: 96px; text-align: right; }
+.col-best    { width: 96px; text-align: right; }
+.col-total   { width: 110px; text-align: right; }
+.col-status  { width: 100px; text-align: center; }
 
 /* Main data rows */
 .lb-row {
@@ -506,6 +507,7 @@ body.state-finished #stop-btn         { display: none; }
 }
 
 .lb-row .col-lap,
+.lb-row .col-current,
 .lb-row .col-best,
 .lb-row .col-total {
   font-family: 'JetBrains Mono', monospace;
@@ -514,6 +516,7 @@ body.state-finished #stop-btn         { display: none; }
   text-align: right;
 }
 .lb-row .col-lap { text-align: center; }
+.lb-row .col-current { color: var(--text-primary); }
 
 .lb-best-overall {
   color: var(--accent-orange) !important;

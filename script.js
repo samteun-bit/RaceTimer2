@@ -12,7 +12,7 @@ const config = {
 let racers = [];
 let nextRacerId = 0;
 
-let records = [];      // persistent across resets
+let records = [];
 let nextRecordId = 0;
 
 const timerState = {
@@ -28,6 +28,33 @@ let expandedRacerId = null;
 let expandedRecordId = null;
 
 // ============================================================
+// localStorage persistence
+// ============================================================
+
+const STORAGE_KEY = 'racetimer_records_v1';
+
+function saveRecordsToStorage() {
+  try {
+    const data = records.map(r => ({ ...r, timestamp: r.timestamp.toISOString() }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch (_) {}
+}
+
+function loadRecordsFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    records = parsed.map(r => ({ ...r, timestamp: new Date(r.timestamp) }));
+    if (records.length > 0) {
+      nextRecordId = Math.max(...records.map(r => r.recordId)) + 1;
+    }
+  } catch (_) {
+    records = [];
+  }
+}
+
+// ============================================================
 // Time Utilities
 // ============================================================
 
@@ -36,6 +63,7 @@ function pad2(n) {
 }
 
 function formatTime(ms) {
+  if (ms < 0) ms = 0;
   const totalCs  = Math.floor(ms / 10);
   const cs       = totalCs % 100;
   const totalSec = Math.floor(ms / 1000);
@@ -68,31 +96,40 @@ function parseTargetTime(str) {
 // ============================================================
 
 function timerTick() {
-  const now = performance.now();
+  const now     = performance.now();
   const elapsed = timerState.elapsed + (now - timerState.startTime);
   document.getElementById('timer-display').textContent = formatTime(elapsed);
   updateLeaderboardRealtime(now);
   timerState.rafId = requestAnimationFrame(timerTick);
 }
 
-// Update total-time cells and re-sort leaderboard rows every frame
+// Called every animation frame — updates current-lap and total columns,
+// then re-sorts rows in DOM if order has changed.
 function updateLeaderboardRealtime(now) {
   const tbody = document.getElementById('leaderboard-body');
   if (!tbody) return;
 
-  // Update running totals for each non-finished racer
   racers.forEach(r => {
-    if (r.finished || !r.currentLapStart) return;
     const row = tbody.querySelector(`.lb-row[data-racer-id="${r.id}"]`);
     if (!row) return;
-    const runningTotal = getTotalTimeMs(r) + (now - r.currentLapStart);
-    row.querySelector('.col-total').textContent = formatTime(runningTotal);
+
+    if (r.finished) {
+      row.querySelector('.col-current').textContent = '—';
+      return;
+    }
+    if (!r.currentLapStart) return;
+
+    const currentLapMs  = now - r.currentLapStart;
+    const runningTotal  = getTotalTimeMs(r) + currentLapMs;
+
+    row.querySelector('.col-current').textContent = formatTime(currentLapMs);
+    row.querySelector('.col-total').textContent   = formatTime(runningTotal);
   });
 
-  // Re-sort DOM rows if order changed
-  const sorted = sortedRacersRealtime(now);
+  // Re-sort DOM rows when the ranking order changes
+  const sorted      = sortedRacersRealtime(now);
   const currentOrder = [...tbody.querySelectorAll('.lb-row')].map(r => r.dataset.racerId).join(',');
-  const newOrder = sorted.map(r => String(r.id)).join(',');
+  const newOrder     = sorted.map(r => String(r.id)).join(',');
 
   if (currentOrder !== newOrder) {
     sorted.forEach((racer, i) => {
@@ -101,7 +138,6 @@ function updateLeaderboardRealtime(now) {
       if (mainRow)   tbody.appendChild(mainRow);
       if (detailRow) tbody.appendChild(detailRow);
 
-      // Update position badge
       if (mainRow) {
         mainRow.querySelector('.col-pos').textContent = i + 1;
         mainRow.classList.remove('is-p1', 'is-p2', 'is-p3');
@@ -140,15 +176,15 @@ function startRace() {
 
   const now = performance.now();
   timerState.startTime = now;
-  timerState.elapsed = 0;
-  timerState.running = true;
+  timerState.elapsed   = 0;
+  timerState.running   = true;
 
   racers.forEach(r => {
-    r.lapTimes = [];
+    r.lapTimes        = [];
     r.currentLapStart = now;
-    r.finished = false;
-    r.finishPosition = null;
-    r.recorded = false;
+    r.finished        = false;
+    r.finishPosition  = null;
+    r.recorded        = false;
   });
 
   timerState.rafId = requestAnimationFrame(timerTick);
@@ -158,14 +194,14 @@ function startRace() {
 function pauseRace() {
   const now = performance.now();
   timerState.elapsed += now - timerState.startTime;
-  timerState.pauseAt = now;
-  timerState.running = false;
+  timerState.pauseAt  = now;
+  timerState.running  = false;
   cancelAnimationFrame(timerState.rafId);
   setRaceState('paused');
 }
 
 function resumeRace() {
-  const now = performance.now();
+  const now          = performance.now();
   const pauseDuration = now - timerState.pauseAt;
 
   racers.forEach(r => {
@@ -175,17 +211,17 @@ function resumeRace() {
   });
 
   timerState.startTime = now;
-  timerState.running = true;
-  timerState.rafId = requestAnimationFrame(timerTick);
+  timerState.running   = true;
+  timerState.rafId     = requestAnimationFrame(timerTick);
   setRaceState('running');
 }
 
 function resetRace() {
   cancelAnimationFrame(timerState.rafId);
-  timerState.running = false;
+  timerState.running   = false;
   timerState.startTime = null;
-  timerState.elapsed = 0;
-  timerState.rafId = null;
+  timerState.elapsed   = 0;
+  timerState.rafId     = null;
 
   // Save any racer with laps that hasn't been recorded yet
   racers.forEach(r => {
@@ -195,11 +231,11 @@ function resetRace() {
   });
 
   racers.forEach(r => {
-    r.lapTimes = [];
+    r.lapTimes        = [];
     r.currentLapStart = null;
-    r.finished = false;
-    r.finishPosition = null;
-    r.recorded = false;
+    r.finished        = false;
+    r.finishPosition  = null;
+    r.recorded        = false;
   });
 
   expandedRacerId = null;
@@ -223,11 +259,11 @@ function setRaceState(state) {
   switch (state) {
     case 'idle':
       badge.classList.add('status-idle');
-      badge.textContent = 'READY';
+      badge.textContent    = 'READY';
       startBtn.textContent = 'START';
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
-      resetBtn.disabled = true;
+      startBtn.disabled    = false;
+      stopBtn.disabled     = true;
+      resetBtn.disabled    = true;
       lockConfig(false);
       break;
 
@@ -235,17 +271,17 @@ function setRaceState(state) {
       badge.classList.add('status-running');
       badge.textContent = 'RACING';
       stopBtn.textContent = 'PAUSE';
-      stopBtn.disabled = false;
-      resetBtn.disabled = false;
+      stopBtn.disabled    = false;
+      resetBtn.disabled   = false;
       lockConfig(true);
       break;
 
     case 'paused':
       badge.classList.add('status-paused');
-      badge.textContent = 'PAUSED';
+      badge.textContent    = 'PAUSED';
       startBtn.textContent = 'RESUME';
-      startBtn.disabled = false;
-      resetBtn.disabled = false;
+      startBtn.disabled    = false;
+      resetBtn.disabled    = false;
       lockConfig(true);
       break;
 
@@ -270,35 +306,36 @@ function lockConfig(locked) {
 }
 
 // ============================================================
-// Records (persistent)
+// Records (persistent via localStorage)
 // ============================================================
 
 function saveRacerRecord(racer) {
   records.push({
-    recordId: nextRecordId++,
-    name: racer.name,
-    lapTimes: [...racer.lapTimes],
-    totalMs: racer.lapTimes.reduce((a, b) => a + b, 0),
+    recordId:  nextRecordId++,
+    name:      racer.name,
+    lapTimes:  [...racer.lapTimes],
+    totalMs:   racer.lapTimes.reduce((a, b) => a + b, 0),
     bestLapMs: racer.lapTimes.length ? Math.min(...racer.lapTimes) : null,
     totalLaps: config.totalLaps,
-    finished: racer.finished,
+    finished:  racer.finished,
     timestamp: new Date(),
   });
   racer.recorded = true;
+  saveRecordsToStorage();
   renderRecords();
 }
 
 function deleteRecord(recordId) {
   records = records.filter(r => r.recordId !== recordId);
   if (expandedRecordId === recordId) expandedRecordId = null;
+  saveRecordsToStorage();
   renderRecords();
 }
 
 function renderRecords() {
-  const section  = document.getElementById('records-section');
-  const empty    = document.getElementById('records-empty');
-  const tbody    = document.getElementById('records-body');
-  const table    = document.getElementById('records-table');
+  const empty = document.getElementById('records-empty');
+  const tbody = document.getElementById('records-body');
+  const table = document.getElementById('records-table');
 
   if (records.length === 0) {
     empty.style.display = 'block';
@@ -308,7 +345,7 @@ function renderRecords() {
   empty.style.display = 'none';
   table.style.display = '';
 
-  // Find overall best lap across all records
+  // Overall best lap across all records
   let overallBest = null;
   records.forEach(r => {
     if (r.bestLapMs !== null && (overallBest === null || r.bestLapMs < overallBest)) {
@@ -316,14 +353,14 @@ function renderRecords() {
     }
   });
 
-  tbody.innerHTML = '';
-
-  // Sort: finished first, then by total time ascending
+  // Sort: finished first, then by total time
   const sorted = [...records].sort((a, b) => {
     if (a.finished && !b.finished) return -1;
     if (!a.finished && b.finished) return 1;
     return a.totalMs - b.totalMs;
   });
+
+  tbody.innerHTML = '';
 
   sorted.forEach((rec, i) => {
     const mainRow = document.createElement('tr');
@@ -334,12 +371,10 @@ function renderRecords() {
     else if (i === 2) mainRow.classList.add('is-p3');
     if (expandedRecordId === rec.recordId) mainRow.classList.add('is-expanded');
 
-    const dateStr = rec.timestamp.toLocaleDateString() + ' ' +
-                    rec.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
+    const dateStr   = rec.timestamp.toLocaleDateString() + ' ' +
+                      rec.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const bestClass = rec.bestLapMs === overallBest ? 'lb-best-overall' : '';
     const bestText  = rec.bestLapMs !== null ? formatTime(rec.bestLapMs) : '—';
-    const totalText = formatTime(rec.totalMs);
     const lapsText  = `${rec.lapTimes.length}/${rec.totalLaps}`;
     const statusBadge = rec.finished
       ? `<span class="lb-status-badge status-done">FINISHED</span>`
@@ -352,17 +387,13 @@ function renderRecords() {
       </td>
       <td class="col-lap">${lapsText}</td>
       <td class="col-best ${bestClass}">${bestText}</td>
-      <td class="col-total">${totalText}</td>
+      <td class="col-total">${formatTime(rec.totalMs)}</td>
       <td class="rec-date">${dateStr}</td>
       <td class="rec-status">${statusBadge}</td>
       <td class="rec-del">
         <button class="btn-rec-delete" data-delete-id="${rec.recordId}" title="Delete">&#x2715;</button>
       </td>
     `;
-
-    const detailRow = document.createElement('tr');
-    detailRow.className = 'lb-detail-row' + (expandedRecordId === rec.recordId ? ' is-expanded' : '');
-    detailRow.dataset.recordId = rec.recordId;
 
     const chips = rec.lapTimes.map((ms, idx) => {
       let cls = 'no-target';
@@ -375,6 +406,9 @@ function renderRecords() {
       </div>`;
     }).join('');
 
+    const detailRow = document.createElement('tr');
+    detailRow.className = 'lb-detail-row' + (expandedRecordId === rec.recordId ? ' is-expanded' : '');
+    detailRow.dataset.recordId = rec.recordId;
     detailRow.innerHTML = `
       <td colspan="7">
         <div class="lb-detail-inner">
@@ -396,17 +430,17 @@ function renderRecords() {
 
 function addRacer() {
   const input = document.getElementById('racer-name-input');
-  const name = input.value.trim();
+  const name  = input.value.trim();
   if (!name) { shakeElement(input); return; }
 
   racers.push({
-    id: nextRacerId++,
+    id:             nextRacerId++,
     name,
-    lapTimes: [],
+    lapTimes:       [],
     currentLapStart: null,
-    finished: false,
+    finished:       false,
     finishPosition: null,
-    recorded: false,
+    recorded:       false,
   });
 
   input.value = '';
@@ -447,14 +481,14 @@ function recordLap(racerId) {
   const racer = racers.find(r => r.id === racerId);
   if (!racer || racer.finished || raceState !== 'running') return;
 
-  const now = performance.now();
+  const now   = performance.now();
   const lapMs = now - racer.currentLapStart;
 
   racer.lapTimes.push(lapMs);
   racer.currentLapStart = now;
 
   if (racer.lapTimes.length >= config.totalLaps) {
-    racer.finished = true;
+    racer.finished      = true;
     racer.finishPosition = racers.filter(r => r.finished).length;
     saveRacerRecord(racer);
     flashFinish(racerId);
@@ -522,11 +556,11 @@ function renderLeaderboard() {
 
   if (racers.length === 0) {
     emptyMsg.style.display = 'block';
-    table.style.display = 'none';
+    table.style.display    = 'none';
     return;
   }
   emptyMsg.style.display = 'none';
-  table.style.display = '';
+  table.style.display    = '';
 
   const sorted      = sortedRacers();
   const overallBest = overallBestLapMs();
@@ -537,7 +571,6 @@ function renderLeaderboard() {
   tbody.querySelectorAll('.lb-detail-row').forEach(row => { existingDetails[row.dataset.racerId] = row; });
 
   sorted.forEach((racer, index) => {
-    const pos = index + 1;
     let mainRow   = existingRows[racer.id];
     let detailRow = existingDetails[racer.id];
 
@@ -546,7 +579,7 @@ function renderLeaderboard() {
       detailRow = createDetailRow(racer.id);
     }
 
-    updateMainRow(mainRow, racer, pos, overallBest);
+    updateMainRow(mainRow, racer, index + 1, overallBest);
     updateDetailRow(detailRow, racer);
 
     tbody.appendChild(mainRow);
@@ -563,12 +596,13 @@ function renderLeaderboard() {
 
 function createMainRow(racerId) {
   const tr = document.createElement('tr');
-  tr.className = 'lb-row';
+  tr.className    = 'lb-row';
   tr.dataset.racerId = racerId;
   tr.innerHTML = `
     <td class="col-pos"></td>
     <td class="col-racer"><span class="lb-racer-name"></span><span class="lb-expand-icon">&#x25BE;</span></td>
     <td class="col-lap"></td>
+    <td class="col-current">—</td>
     <td class="col-best"></td>
     <td class="col-total"></td>
     <td class="col-status"></td>
@@ -591,8 +625,11 @@ function updateMainRow(row, racer, pos, overallBest) {
   row.querySelector('.col-lap').textContent =
     raceState === 'idle' ? '—' : `${lapDone}/${config.totalLaps}`;
 
-  const bestMs  = getBestLapMs(racer);
-  const bestEl  = row.querySelector('.col-best');
+  // col-current: shows '—' for finished/idle; live value filled by updateLeaderboardRealtime
+  row.querySelector('.col-current').textContent = racer.finished ? '—' : '—';
+
+  const bestMs = getBestLapMs(racer);
+  const bestEl = row.querySelector('.col-best');
   bestEl.textContent = bestMs !== null ? formatTime(bestMs) : '—';
   bestEl.className   = 'col-best' + (bestMs !== null && bestMs === overallBest ? ' lb-best-overall' : '');
 
@@ -612,10 +649,10 @@ function updateMainRow(row, racer, pos, overallBest) {
 
 function createDetailRow(racerId) {
   const tr = document.createElement('tr');
-  tr.className = 'lb-detail-row';
+  tr.className       = 'lb-detail-row';
   tr.dataset.racerId = racerId;
   tr.innerHTML = `
-    <td colspan="6">
+    <td colspan="7">
       <div class="lb-detail-inner">
         <div class="lb-detail-content">
           <div class="lb-detail-grid"></div>
@@ -634,13 +671,13 @@ function updateDetailRow(row, racer) {
   racer.lapTimes.forEach((ms, i) => {
     const chip = document.createElement('div');
     chip.className = 'lb-lap-chip';
-    let timeClass = 'no-target';
+    let cls = 'no-target';
     if (config.targetLapMs !== null) {
-      timeClass = ms <= config.targetLapMs ? 'is-faster' : 'is-slower';
+      cls = ms <= config.targetLapMs ? 'is-faster' : 'is-slower';
     }
     chip.innerHTML = `
       <span class="lb-lap-num">Lap ${i + 1}</span>
-      <span class="lb-lap-time ${timeClass}">${formatTime(ms)}</span>
+      <span class="lb-lap-time ${cls}">${formatTime(ms)}</span>
     `;
     grid.appendChild(chip);
   });
@@ -660,10 +697,10 @@ function renderLapButtons() {
 
   racers.forEach(r => {
     const btn = document.createElement('button');
-    btn.className = 'lap-btn' + (r.finished ? ' is-finished' : '');
+    btn.className      = 'lap-btn' + (r.finished ? ' is-finished' : '');
     btn.dataset.racerId = r.id;
-    const lapNum    = r.lapTimes.length + 1;
-    const displayLap = r.finished ? 'FINISHED' : `Lap ${lapNum} / ${config.totalLaps}`;
+    const lapNum      = r.lapTimes.length + 1;
+    const displayLap  = r.finished ? 'FINISHED' : `Lap ${lapNum} / ${config.totalLaps}`;
     btn.innerHTML = `
       <span class="lap-btn-name">${escHtml(r.name)}</span>
       <span class="lap-btn-lap">${displayLap}</span>
@@ -673,7 +710,7 @@ function renderLapButtons() {
 }
 
 // ============================================================
-// Rendering helpers
+// Helpers
 // ============================================================
 
 function renderLapIndicator() {
@@ -711,7 +748,7 @@ function shakeElement(el) {
 
 function bindEvents() {
   document.getElementById('start-btn').addEventListener('click', () => {
-    if (raceState === 'idle') startRace();
+    if (raceState === 'idle')   startRace();
     else if (raceState === 'paused') resumeRace();
   });
 
@@ -720,7 +757,7 @@ function bindEvents() {
   });
 
   document.getElementById('reset-btn').addEventListener('click', () => {
-    if (!confirm('Reset the race? (Lap records will be saved to history.)')) return;
+    if (!confirm('Reset the race? (Current lap data will be saved to Records.)')) return;
     resetRace();
   });
 
@@ -734,7 +771,7 @@ function bindEvents() {
     let val = parseInt(e.target.value, 10);
     if (isNaN(val) || val < 1) val = 1;
     if (val > 99) val = 99;
-    e.target.value = val;
+    e.target.value  = val;
     config.totalLaps = val;
     renderLapIndicator();
     renderLapButtons();
@@ -758,7 +795,6 @@ function bindEvents() {
     if (btn) recordLap(parseInt(btn.dataset.racerId, 10));
   });
 
-  // Leaderboard expand/collapse
   document.getElementById('leaderboard-body').addEventListener('click', e => {
     const row = e.target.closest('.lb-row');
     if (!row) return;
@@ -767,7 +803,6 @@ function bindEvents() {
     renderLeaderboard();
   });
 
-  // Records: expand/collapse and delete
   document.getElementById('records-body').addEventListener('click', e => {
     const delBtn = e.target.closest('[data-delete-id]');
     if (delBtn) {
@@ -784,7 +819,7 @@ function bindEvents() {
 }
 
 // ============================================================
-// Shake keyframe (injected)
+// Shake keyframe
 // ============================================================
 
 (function injectShakeKeyframe() {
@@ -806,6 +841,7 @@ function bindEvents() {
 // ============================================================
 
 document.addEventListener('DOMContentLoaded', () => {
+  loadRecordsFromStorage();
   config.totalLaps = parseInt(document.getElementById('lap-count-input').value, 10);
   bindEvents();
   renderAll();
