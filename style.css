@@ -99,8 +99,8 @@ header {
 }
 
 #left-panel {
-  flex: 0 0 500px;
-  min-width: 360px;
+  flex: 0 0 580px;
+  min-width: 380px;
   background: var(--bg-panel);
   overflow-y: auto;
   padding: 1.5rem;
@@ -146,11 +146,12 @@ header {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 8px;
+  overflow: hidden;
 }
 
 #timer-display {
   font-family: 'JetBrains Mono', 'Courier New', monospace;
-  font-size: clamp(4rem, 9vw, 6.5rem);
+  font-size: clamp(3rem, 8vw, 5.5rem);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
